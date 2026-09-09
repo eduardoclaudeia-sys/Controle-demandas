@@ -1,62 +1,12 @@
--- Central Lucro Real - schema inicial
 create extension if not exists pgcrypto;
-
-create table if not exists empresas (
-  id uuid primary key default gen_random_uuid(),
-  nome text not null,
-  cnpj text,
-  ativo boolean not null default true,
-  criado_em timestamptz not null default now()
-);
-
-create table if not exists perfis (
-  id uuid primary key references auth.users(id) on delete cascade,
-  nome text not null,
-  email text,
-  criado_em timestamptz not null default now()
-);
-
-create table if not exists demandas (
-  id uuid primary key default gen_random_uuid(),
-  empresa_id uuid references empresas(id) on delete cascade,
-  titulo text not null,
-  setor text not null check (setor in ('Fiscal','Contábil')),
-  categoria text,
-  competencia text,
-  prazo date,
-  responsavel_id uuid references perfis(id),
-  prioridade text not null default 'Média',
-  status text not null default 'A fazer',
-  observacao text,
-  criado_em timestamptz not null default now()
-);
-
-create table if not exists pendencias (
-  id uuid primary key default gen_random_uuid(),
-  empresa_id uuid references empresas(id) on delete cascade,
-  demanda_id uuid references demandas(id) on delete cascade,
-  descricao text not null,
-  competencia text,
-  concluido boolean not null default false,
-  criado_em timestamptz not null default now()
-);
-
-alter table empresas enable row level security;
-alter table perfis enable row level security;
-alter table demandas enable row level security;
-alter table pendencias enable row level security;
-
-create policy "usuarios autenticados podem ler empresas" on empresas
-for select to authenticated using (true);
-
-create policy "usuarios autenticados podem gerenciar empresas" on empresas
-for all to authenticated using (true) with check (true);
-
-create policy "usuarios autenticados podem ler perfis" on perfis
-for select to authenticated using (true);
-
-create policy "usuarios autenticados podem gerenciar demandas" on demandas
-for all to authenticated using (true) with check (true);
-
-create policy "usuarios autenticados podem gerenciar pendencias" on pendencias
-for all to authenticated using (true) with check (true);
+create table if not exists public.perfis(id uuid primary key references auth.users(id) on delete cascade,nome text,email text,criado_em timestamptz not null default now());
+create table if not exists public.empresas(id uuid primary key default gen_random_uuid(),nome text not null,cnpj text,ativo boolean not null default true,criado_em timestamptz not null default now(),criado_por uuid references auth.users(id) on delete set null);
+create table if not exists public.demandas(id uuid primary key default gen_random_uuid(),empresa_id uuid not null references public.empresas(id) on delete cascade,titulo text not null,setor text not null check(setor in('Fiscal','Contábil')),categoria text,competencia text,prazo date,responsavel_nome text,prioridade text not null default 'Média' check(prioridade in('Baixa','Média','Alta')),status text not null default 'A fazer',observacao text,criado_por uuid references auth.users(id) on delete set null,criado_em timestamptz not null default now(),atualizado_em timestamptz not null default now());
+create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$begin insert into public.perfis(id,nome,email) values(new.id,coalesce(new.raw_user_meta_data->>'nome',''),new.email) on conflict(id) do nothing; return new; end;$$;
+drop trigger if exists on_auth_user_created on auth.users;create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+create or replace function public.set_updated_at() returns trigger language plpgsql as $$begin new.atualizado_em=now();return new;end;$$;
+drop trigger if exists demandas_updated_at on public.demandas;create trigger demandas_updated_at before update on public.demandas for each row execute procedure public.set_updated_at();
+alter table public.perfis enable row level security;alter table public.empresas enable row level security;alter table public.demandas enable row level security;
+drop policy if exists perfis_select on public.perfis;create policy perfis_select on public.perfis for select to authenticated using(true);
+drop policy if exists empresas_auth_all on public.empresas;create policy empresas_auth_all on public.empresas for all to authenticated using(true) with check(true);
+drop policy if exists demandas_auth_all on public.demandas;create policy demandas_auth_all on public.demandas for all to authenticated using(true) with check(true);
